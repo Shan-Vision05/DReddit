@@ -318,7 +318,6 @@ func (vs *VoteState) ApplyVote(vote models.Vote, nodeID models.NodeID) {
 	}
 }
 
-// GetScore returns the current vote score.
 func (vs *VoteState) GetScore() int64 {
 	return vs.Score.Value()
 }

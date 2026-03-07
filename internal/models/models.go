@@ -49,6 +49,30 @@ func (p *Post) ComputeHash() ContentHash {
 	return ContentHash(hex.EncodeToString(hash[:]))
 }
 
+type Comment struct {
+	Hash       ContentHash `json:"hash"`
+	PostHash   ContentHash `json:"post_hash"`
+	ParentHash ContentHash `json:"parent_hash,omitempty"`
+	AuthorID   UserID      `json:"author_id"`
+	Body       string      `json:"body"`
+	CreatedAt  time.Time   `json:"created_at"`
+	IsRemoved  bool        `json:"is_removed"`
+}
+
+func (c *Comment) ComputeHash() ContentHash {
+	data := struct {
+		PostHash   ContentHash `json:"post_hash"`
+		ParentHash ContentHash `json:"parent_hash"`
+		AuthorID   UserID      `json:"author_id"`
+		Body       string      `json:"body"`
+		CreatedAt  time.Time   `json:"created_at"`
+	}{c.PostHash, c.ParentHash, c.AuthorID, c.Body, c.CreatedAt}
+
+	jsonData, _ := json.Marshal(data)
+	hash := sha256.Sum256(jsonData)
+	return ContentHash(hex.EncodeToString(hash[:]))
+}
+
 type VoteType int
 
 const (
