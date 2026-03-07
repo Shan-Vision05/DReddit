@@ -6,7 +6,7 @@ import (
 
 "github.com/hashicorp/raft"
 
-"github.com/Shan-Vision05/DReddit/internal/models"
+"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
 )
 
 func createTestCluster(t *testing.T, n int) ([]*RaftNode, []raft.LoopbackTransport) {

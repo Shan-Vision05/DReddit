@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Shan-Vision05/DReddit/internal/models"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
 )
 
 // Positive Negative Counter (PNCounter) implementation

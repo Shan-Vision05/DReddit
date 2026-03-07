@@ -10,7 +10,7 @@ import (
 
 	"github.com/hashicorp/raft"
 
-	"github.com/Shan-Vision05/DReddit/internal/models"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
 )
 
 type RaftNode struct {

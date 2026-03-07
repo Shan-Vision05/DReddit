@@ -1,4 +1,4 @@
-module github.com/Shan-Vision05/DReddit
+module github.com/Shan-Vision05/Distributed-Reddit
 
 go 1.25.7
 

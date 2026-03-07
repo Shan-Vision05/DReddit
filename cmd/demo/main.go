@@ -8,10 +8,10 @@ import (
 
 	"github.com/hashicorp/raft"
 
-	"github.com/Shan-Vision05/DReddit/internal/consensus"
-	"github.com/Shan-Vision05/DReddit/internal/crdt"
-	"github.com/Shan-Vision05/DReddit/internal/models"
-	"github.com/Shan-Vision05/DReddit/internal/storage"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/consensus"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/crdt"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/storage"
 )
 
 func main() {

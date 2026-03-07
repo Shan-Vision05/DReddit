@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/Shan-Vision05/DReddit/internal/crdt"
-	"github.com/Shan-Vision05/DReddit/internal/models"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/crdt"
+	"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
 )
 
 type ContentStore struct {

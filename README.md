@@ -1,4 +1,4 @@
-# DReddit — Decentralized Reddit
+# Distributed-Reddit
 
 A decentralized Reddit platform built in Go. Based on the DReddit paper by Saiteja Poluka, Shanmukha Vamshi Kuruba, and Jayanth Vunnam (CU Boulder).
 
@@ -92,7 +92,7 @@ The `2>/dev/null` suppresses HashiCorp Raft's internal debug logs.
 ## Project Structure
 
 ```
-DReddit/
+Distributed-Reddit/
 ├── cmd/
 │   └── demo/
 │       └── main.go              # runnable demo
