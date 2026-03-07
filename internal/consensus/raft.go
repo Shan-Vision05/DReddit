@@ -160,6 +160,13 @@ func (rn *RaftNode) CommunityID() models.CommunityID {
 	return rn.communityID
 }
 
+// Bootstrap initializes the Raft cluster with the given server configuration.
+// Should only be called once on one node when the cluster is first created.
+func (rn *RaftNode) Bootstrap(servers []raft.Server) error {
+	f := rn.raft.BootstrapCluster(raft.Configuration{Servers: servers})
+	return f.Error()
+}
+
 func DataDir(baseDir string, communityID models.CommunityID) string {
 	return filepath.Join(baseDir, "raft", string(communityID))
 }
