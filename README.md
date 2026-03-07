@@ -80,9 +80,6 @@ Right now everything runs inside a single process (the demo). Steps 5-6 add real
 # run the demo
 go run ./cmd/demo/ 2>/dev/null
 
-# run all tests (27 tests)
-go test ./... -v
-
 # build
 go build ./...
 ```
@@ -100,15 +97,12 @@ Distributed-Reddit/
 │   ├── models/
 │   │   └── models.go            # core data types
 │   ├── crdt/
-│   │   ├── crdt.go              # CRDT implementations
-│   │   └── crdt_test.go         # 11 tests
+│   │   └── crdt.go              # CRDT implementations
 │   ├── storage/
-│   │   ├── content_store.go     # content-addressed storage
-│   │   └── content_store_test.go # 6 tests
+│   │   └── content_store.go     # content-addressed storage
 │   └── consensus/
 │       ├── fsm.go               # Raft finite state machine
-│       ├── raft.go              # HashiCorp Raft wrapper
-│       └── raft_test.go         # 10 tests
+│       └── raft.go              # HashiCorp Raft wrapper
 ├── go.mod
 ├── go.sum
 └── LICENSE
