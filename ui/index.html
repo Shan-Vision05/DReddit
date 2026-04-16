@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed Reddit Node</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; max-width: 600px; background: #f9f9f9; }
+        section { background: #fff; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; font-size: 1.2rem; }
+        input, textarea, button { margin: 8px 0; padding: 10px; display: block; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #ff4500; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #e03d00; }
+        .vote-btns { display: flex; gap: 10px; }
+        .vote-btns button { background: #0079d3; }
+        #log { background: #222; color: #0f0; padding: 15px; height: 150px; overflow-y: auto; font-family: monospace; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>DReddit Web UI</h1>
+
+    <section>
+        <h2>1. Join a Community</h2>
+        <input type="text" id="join-comm-id" placeholder="e.g., r/distributed">
+        <button onclick="joinCommunity()">Join Node to Community</button>
+    </section>
+
+    <section>
+        <h2>2. Create a Post</h2>
+        <input type="text" id="post-comm-id" placeholder="Community ID (e.g., r/distributed)">
+        <input type="text" id="post-title" placeholder="Post Title">
+        <textarea id="post-content" placeholder="Post Content" rows="3"></textarea>
+        <button onclick="createPost()">Submit Post</button>
+    </section>
+
+    <section>
+        <h2>3. Vote on a Post</h2>
+        <input type="text" id="vote-comm-id" placeholder="Community ID">
+        <input type="text" id="vote-target" placeholder="Target Hash (Copy from Action Log)">
+        <div class="vote-btns">
+            <button onclick="vote(1)">Upvote (+1)</button>
+            <button onclick="vote(-1)">Downvote (-1)</button>
+        </div>
+    </section>
+
+    <section>
+        <h2>Action Log</h2>
+        <div id="log"></div>
+    </section>
+
+    <script>
+        // Adjust this if you start your node on a different port!
+        const API_BASE = 'http://localhost:8080/api';
+
+        function logMessage(msg) {
+            const logDiv = document.getElementById('log');
+            logDiv.innerHTML += `<div>> ${msg}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        async function joinCommunity() {
+            const commId = document.getElementById('join-comm-id').value;
+            try {
+                const res = await fetch(`${API_BASE}/join`, {
+                    method: 'POST',
+                    body: JSON.stringify({ community_id: commId })
+                });
+                const text = await res.text();
+                logMessage(res.ok ? `Success: ${text}` : `Error: ${text}`);
+            } catch (e) {
+                logMessage(`Network Error: ${e.message}`);
+            }
+        }
+
+        async function createPost() {
+            const post = {
+                CommunityID: document.getElementById('post-comm-id').value,
+                Title: document.getElementById('post-title').value,
+                Content: document.getElementById('post-content').value,
+                Author: "WebUser" // Hardcoded for this simple UI
+            };
+            try {
+                const res = await fetch(`${API_BASE}/post`, {
+                    method: 'POST',
+                    body: JSON.stringify(post)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    logMessage(`Post created! Hash: ${data.hash}`);
+                } else {
+                    logMessage(`Error: ${await res.text()}`);
+                }
+            } catch (e) {
+                logMessage(`Network Error: ${e.message}`);
+            }
+        }
+
+        async function vote(value) {
+            const req = {
+                community_id: document.getElementById('vote-comm-id').value,
+                vote: {
+                    TargetHash: document.getElementById('vote-target').value,
+                    Value: value
+                }
+            };
+            try {
+                const res = await fetch(`${API_BASE}/vote`, {
+                    method: 'POST',
+                    body: JSON.stringify(req)
+                });
+                const text = await res.text();
+                logMessage(res.ok ? `Vote recorded: ${text}` : `Error: ${text}`);
+            } catch (e) {
+                logMessage(`Network Error: ${e.message}`);
+            }
+        }
+    </script>
+</body>
+</html>
