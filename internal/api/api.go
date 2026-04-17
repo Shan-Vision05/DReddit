@@ -3,36 +3,42 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/node"
 )
 
-// Server represents the HTTP API layer that exposes our distributed node to the outside world.
 type Server struct {
 	node *node.Node
 }
 
-// NewServer creates a new API server attached to the given node.
 func NewServer(n *node.Node) *Server {
 	return &Server{node: n}
 }
 
-// Start boots up the HTTP server on the given address (e.g., ":8080").
 func (s *Server) Start(addr string) error {
 	mux := http.NewServeMux()
 
 	mux.Handle("/", http.FileServer(http.Dir("./ui")))
 
-	// Register our API endpoints
+	mux.HandleFunc("/api/communities", s.handleGetCommunities)
 	mux.HandleFunc("/api/join", s.handleJoinCommunity)
+	mux.HandleFunc("/api/posts", s.handleGetPosts)
 	mux.HandleFunc("/api/post", s.handleCreatePost)
+	mux.HandleFunc("/api/comments", s.handleGetComments)
+	mux.HandleFunc("/api/comment", s.handleCreateComment)
 	mux.HandleFunc("/api/vote", s.handleVote)
 
 	return http.ListenAndServe(addr, mux)
 }
 
-// handleJoinCommunity allows the node to join a new community via an HTTP POST request.
+func (s *Server) handleGetCommunities(w http.ResponseWriter, r *http.Request) {
+	comms := s.node.GetJoinedCommunities()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(comms)
+}
+
 func (s *Server) handleJoinCommunity(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -47,18 +53,37 @@ func (s *Server) handleJoinCommunity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Route the request down to the Node Orchestrator (Step 8)
-	err := s.node.JoinCommunity(models.CommunityID(req.CommunityID))
-	if err != nil {
+	if err := s.node.JoinCommunity(models.CommunityID(req.CommunityID)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Successfully joined community: " + req.CommunityID))
 }
 
-// handleCreatePost creates a post in a specific community.
+func (s *Server) handleGetPosts(w http.ResponseWriter, r *http.Request) {
+	commID := r.URL.Query().Get("community_id")
+	manager, err := s.node.GetCommunity(models.CommunityID(commID))
+	if err != nil {
+		http.Error(w, "Not a member of this community", http.StatusNotFound)
+		return
+	}
+
+	posts, scores := manager.GetPosts()
+	
+	type PostResponse struct {
+		*models.Post
+		Score int64 `json:"score"`
+	}
+	
+	var res []PostResponse
+	for _, p := range posts {
+		res = append(res, PostResponse{Post: p, Score: scores[p.Hash]})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
 func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -70,27 +95,86 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
 		return
 	}
+	
+	post.CreatedAt = time.Now()
+	post.Hash = post.ComputeHash()
 
-	// 1. Ask the Node to find the right Community Manager
 	manager, err := s.node.GetCommunity(post.CommunityID)
 	if err != nil {
 		http.Error(w, "Not a member of this community", http.StatusNotFound)
 		return
 	}
 
-	// 2. Ask the Community Manager to handle the actual creation (Step 7)
 	hash, err := manager.CreatePost(&post)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 3. Return the unique hash of the new post back to the user
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"hash": string(hash)})
 }
 
-// handleVote registers an upvote or downvote from the user.
+func (s *Server) handleGetComments(w http.ResponseWriter, r *http.Request) {
+	commID := r.URL.Query().Get("community_id")
+	postHash := r.URL.Query().Get("post_hash")
+	
+	manager, err := s.node.GetCommunity(models.CommunityID(commID))
+	if err != nil {
+		http.Error(w, "Not a member of this community", http.StatusNotFound)
+		return
+	}
+
+	comments, scores := manager.GetComments(models.ContentHash(postHash))
+	
+	type CommentResponse struct {
+		*models.Comment
+		Score int64 `json:"score"`
+	}
+
+	var res []CommentResponse
+	for _, c := range comments {
+		res = append(res, CommentResponse{Comment: c, Score: scores[c.Hash]})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		CommunityID string         `json:"community_id"`
+		Comment     models.Comment `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	req.Comment.CreatedAt = time.Now()
+	req.Comment.Hash = req.Comment.ComputeHash()
+
+	manager, err := s.node.GetCommunity(models.CommunityID(req.CommunityID))
+	if err != nil {
+		http.Error(w, "Not a member of this community", http.StatusNotFound)
+		return
+	}
+
+	hash, err := manager.CreateComment(&req.Comment)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"hash": string(hash)})
+}
+
 func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -106,6 +190,8 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Vote.Timestamp = time.Now()
+
 	manager, err := s.node.GetCommunity(models.CommunityID(req.CommunityID))
 	if err != nil {
 		http.Error(w, "Not a member of this community", http.StatusNotFound)
@@ -118,5 +204,4 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Vote recorded successfully"))
 }

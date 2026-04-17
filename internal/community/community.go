@@ -9,8 +9,6 @@ import (
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/storage"
 )
 
-// Manager handles the operations for a single community,
-// bridging Storage (Eventual), Network (Gossip), and Consensus (Raft).
 type Manager struct {
 	communityID models.CommunityID
 	nodeID      models.NodeID
@@ -19,7 +17,6 @@ type Manager struct {
 	raft        *consensus.RaftNode
 }
 
-// NewManager creates a new community manager.
 func NewManager(cid models.CommunityID, nid models.NodeID, s *storage.ContentStore, g *network.GossipNode, r *consensus.RaftNode) *Manager {
 	return &Manager{
 		communityID: cid,
@@ -30,43 +27,31 @@ func NewManager(cid models.CommunityID, nid models.NodeID, s *storage.ContentSto
 	}
 }
 
-// CreatePost stores a post locally and broadcasts it to the network.
 func (m *Manager) CreatePost(post *models.Post) (models.ContentHash, error) {
 	if post.CommunityID != m.communityID {
 		return "", fmt.Errorf("post belongs to a different community")
 	}
-
-	// 1. Store locally
 	hash, err := m.store.StorePost(post)
 	if err != nil {
 		return "", err
 	}
-
-	// 2. Eventual consistency: replicate to other nodes via gossip
 	_ = m.gossip.BroadcastPost(post)
-
 	return hash, nil
 }
 
-// CreateComment stores a comment and broadcasts it.
 func (m *Manager) CreateComment(comment *models.Comment) (models.ContentHash, error) {
 	hash, err := m.store.StoreComment(comment)
 	if err != nil {
 		return "", err
 	}
-
 	_ = m.gossip.BroadcastComment(comment)
 	return hash, nil
 }
 
-// Vote applies a CRDT vote locally and broadcasts the updated state.
 func (m *Manager) Vote(vote models.Vote) error {
-	// 1. Apply vote locally (resolves conflicts using CRDT rules)
 	if err := m.store.ApplyVote(vote, m.nodeID); err != nil {
 		return err
 	}
-
-	// 2. Fetch the newly updated state and broadcast it
 	vs := m.store.GetVoteState(vote.TargetHash)
 	if vs != nil {
 		_ = m.gossip.BroadcastVoteState(vs)
@@ -74,17 +59,43 @@ func (m *Manager) Vote(vote models.Vote) error {
 	return nil
 }
 
-// Moderate proposes a moderation action via Raft (Strong Consistency).
 func (m *Manager) Moderate(action models.ModerationAction) error {
 	if action.CommunityID != m.communityID {
 		return fmt.Errorf("action belongs to a different community")
 	}
-
-	// Strong consistency: all nodes must agree via Raft before it applies
 	return m.raft.Propose(action)
 }
 
-// GetModerationLog retrieves the committed moderation actions for this community.
 func (m *Manager) GetModerationLog() []models.ModerationAction {
 	return m.raft.GetLog()
+}
+
+// GetPosts retrieves all posts for the community along with computed CRDT scores
+func (m *Manager) GetPosts() ([]*models.Post, map[models.ContentHash]int64) {
+	hashes := m.store.GetCommunityPosts(m.communityID)
+	var posts []*models.Post
+	scores := make(map[models.ContentHash]int64)
+	for _, h := range hashes {
+		if p, err := m.store.GetPost(h); err == nil {
+			posts = append(posts, p)
+			score, _ := m.store.GetVoteScore(h)
+			scores[h] = score
+		}
+	}
+	return posts, scores
+}
+
+// GetComments retrieves all comments for a post along with computed CRDT scores
+func (m *Manager) GetComments(postHash models.ContentHash) ([]*models.Comment, map[models.ContentHash]int64) {
+	hashes := m.store.GetPostComments(postHash)
+	var comments []*models.Comment
+	scores := make(map[models.ContentHash]int64)
+	for _, h := range hashes {
+		if c, err := m.store.GetComment(h); err == nil {
+			comments = append(comments, c)
+			score, _ := m.store.GetVoteScore(h)
+			scores[h] = score
+		}
+	}
+	return comments, scores
 }

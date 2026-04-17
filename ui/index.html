@@ -3,117 +3,210 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Distributed Reddit Node</title>
+    <title>DReddit - Decentralized Frontpage</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; max-width: 600px; background: #f9f9f9; }
-        section { background: #fff; border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        h2 { margin-top: 0; font-size: 1.2rem; }
-        input, textarea, button { margin: 8px 0; padding: 10px; display: block; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-        button { background: #ff4500; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: #e03d00; }
-        .vote-btns { display: flex; gap: 10px; }
-        .vote-btns button { background: #0079d3; }
-        #log { background: #222; color: #0f0; padding: 15px; height: 150px; overflow-y: auto; font-family: monospace; border-radius: 4px; }
+        :root { --bg: #dae0e6; --surface: #ffffff; --primary: #ff4500; --text-main: #1c1c1c; --text-muted: #787c7e; --border: #ccc; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; background: var(--bg); color: var(--text-main); }
+        header { background: var(--surface); padding: 10px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+        .logo { font-size: 1.5rem; font-weight: bold; color: var(--primary); display: flex; align-items: center; gap: 8px;}
+        .container { display: grid; grid-template-columns: 1fr 300px; gap: 24px; max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+        
+        .post { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; display: flex; margin-bottom: 16px; transition: border 0.2s; cursor: pointer; }
+        .post:hover { border-color: #898989; }
+        .vote-col { background: #f8f9fa; padding: 8px; display: flex; flex-direction: column; align-items: center; width: 40px; border-radius: 4px 0 0 4px; border-right: 1px solid var(--border); }
+        .vote-btn { cursor: pointer; color: var(--text-muted); font-size: 1.2rem; background: none; border: none; font-weight: bold; }
+        .vote-btn:hover { color: var(--primary); }
+        .score { font-weight: bold; margin: 4px 0; font-size: 0.9rem; }
+        .post-content { padding: 12px; flex: 1; }
+        .meta { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px; }
+        .meta b { color: var(--text-main); }
+        .title { font-size: 1.1rem; font-weight: bold; margin: 0 0 8px 0; }
+        .body { font-size: 0.9rem; line-height: 1.4; color: #333; }
+        
+        .sidebar { background: var(--surface); padding: 16px; border: 1px solid var(--border); border-radius: 4px; height: fit-content; }
+        .btn { background: var(--primary); color: white; border: none; padding: 10px; width: 100%; border-radius: 999px; font-weight: bold; cursor: pointer; margin-bottom: 16px; }
+        .btn:hover { background: #e03d00; }
+        input, textarea { width: 100%; padding: 8px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; }
+        .community-list { list-style: none; padding: 0; margin: 0; }
+        .community-list li { padding: 8px; cursor: pointer; border-radius: 4px; }
+        .community-list li:hover, .community-list li.active { background: var(--bg); font-weight: bold; }
+
+        .comments-section { padding-top: 16px; border-top: 1px solid var(--border); margin-top: 16px; display: none; }
+        .comment { border-left: 2px solid var(--border); padding-left: 12px; margin-bottom: 12px; }
     </style>
 </head>
 <body>
-    <h1>DReddit Web UI</h1>
+    <header>
+        <div class="logo">🌐 DReddit <span style="font-size: 1rem; color: #787c7e; font-weight: normal;">Decentralized Frontpage</span></div>
+        <div style="font-weight: bold;" id="active-user">User: AnonNodeUser</div>
+    </header>
 
-    <section>
-        <h2>1. Join a Community</h2>
-        <input type="text" id="join-comm-id" placeholder="e.g., r/distributed">
-        <button onclick="joinCommunity()">Join Node to Community</button>
-    </section>
+    <div class="container">
+        <main id="feed">
+            <h2 id="feed-title">Select a community</h2>
+            <div id="posts-container"></div>
+        </main>
 
-    <section>
-        <h2>2. Create a Post</h2>
-        <input type="text" id="post-comm-id" placeholder="Community ID (e.g., r/distributed)">
-        <input type="text" id="post-title" placeholder="Post Title">
-        <textarea id="post-content" placeholder="Post Content" rows="3"></textarea>
-        <button onclick="createPost()">Submit Post</button>
-    </section>
+        <aside class="sidebar">
+            <button class="btn" onclick="togglePostForm()">+ Create Post</button>
+            <div id="create-post-form" style="display: none; margin-bottom: 20px;">
+                <input type="text" id="post-title" placeholder="Title">
+                <textarea id="post-body" placeholder="Text (optional)" rows="4"></textarea>
+                <button class="btn" onclick="submitPost()">Submit</button>
+            </div>
 
-    <section>
-        <h2>3. Vote on a Post</h2>
-        <input type="text" id="vote-comm-id" placeholder="Community ID">
-        <input type="text" id="vote-target" placeholder="Target Hash (Copy from Action Log)">
-        <div class="vote-btns">
-            <button onclick="vote(1)">Upvote (+1)</button>
-            <button onclick="vote(-1)">Downvote (-1)</button>
-        </div>
-    </section>
-
-    <section>
-        <h2>Action Log</h2>
-        <div id="log"></div>
-    </section>
+            <h3 style="font-size: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 8px;">Communities</h3>
+            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                <input type="text" id="join-comm" placeholder="e.g. golang" style="margin: 0;">
+                <button class="btn" style="margin: 0; width: auto;" onclick="joinCommunity()">Join</button>
+            </div>
+            <ul class="community-list" id="community-list"></ul>
+        </aside>
+    </div>
 
     <script>
-        // Adjust this if you start your node on a different port!
-        const API_BASE = 'http://localhost:8080/api';
+        const API = 'http://localhost:8080/api';
+        const USER_ID = "WebUser_" + Math.floor(Math.random() * 1000);
+        document.getElementById('active-user').innerText = `User: ${USER_ID}`;
+        let activeCommunity = '';
 
-        function logMessage(msg) {
-            const logDiv = document.getElementById('log');
-            logDiv.innerHTML += `<div>> ${msg}</div>`;
-            logDiv.scrollTop = logDiv.scrollHeight;
+        async function init() { await fetchCommunities(); }
+
+        async function fetchCommunities() {
+            const res = await fetch(`${API}/communities`);
+            const comms = await res.json() || [];
+            const list = document.getElementById('community-list');
+            list.innerHTML = '';
+            
+            comms.forEach(c => {
+                const li = document.createElement('li');
+                li.innerText = `d/${c}`;
+                li.className = c === activeCommunity ? 'active' : '';
+                li.onclick = () => selectCommunity(c);
+                list.appendChild(li);
+            });
+
+            if (comms.length > 0 && !activeCommunity) selectCommunity(comms[0]);
         }
 
         async function joinCommunity() {
-            const commId = document.getElementById('join-comm-id').value;
-            try {
-                const res = await fetch(`${API_BASE}/join`, {
-                    method: 'POST',
-                    body: JSON.stringify({ community_id: commId })
-                });
-                const text = await res.text();
-                logMessage(res.ok ? `Success: ${text}` : `Error: ${text}`);
-            } catch (e) {
-                logMessage(`Network Error: ${e.message}`);
-            }
+            const id = document.getElementById('join-comm').value.trim();
+            if(!id) return;
+            await fetch(`${API}/join`, { method: 'POST', body: JSON.stringify({ community_id: id }) });
+            document.getElementById('join-comm').value = '';
+            await fetchCommunities();
+            selectCommunity(id);
         }
 
-        async function createPost() {
+        function selectCommunity(id) {
+            activeCommunity = id;
+            document.getElementById('feed-title').innerText = `d/${id}`;
+            fetchCommunities(); 
+            loadPosts();
+        }
+
+        async function loadPosts() {
+            if(!activeCommunity) return;
+            const res = await fetch(`${API}/posts?community_id=${activeCommunity}`);
+            const posts = await res.json() || [];
+            posts.sort((a,b) => b.score - a.score);
+
+            const container = document.getElementById('posts-container');
+            container.innerHTML = '';
+            
+            posts.forEach(p => {
+                container.innerHTML += `
+                    <div class="post">
+                        <div class="vote-col">
+                            <button class="vote-btn" onclick="vote('${p.hash}', 1, event)">▲</button>
+                            <span class="score">${p.score}</span>
+                            <button class="vote-btn" onclick="vote('${p.hash}', -1, event)">▼</button>
+                        </div>
+                        <div class="post-content" onclick="toggleComments('${p.hash}')">
+                            <div class="meta">Posted by <b>${p.author_id}</b></div>
+                            <h3 class="title">${p.title}</h3>
+                            <div class="body">${p.body}</div>
+                            
+                            <div class="comments-section" id="comments-${p.hash}">
+                                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                                    <input type="text" id="reply-${p.hash}" placeholder="Add a comment..." style="margin: 0;" onclick="event.stopPropagation()">
+                                    <button class="btn" style="margin: 0; width: auto; padding: 0 16px;" onclick="submitComment('${p.hash}', event)">Reply</button>
+                                </div>
+                                <div id="comments-list-${p.hash}"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        async function vote(hash, value, event) {
+            event.stopPropagation();
+            await fetch(`${API}/vote`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    community_id: activeCommunity,
+                    vote: { target_hash: hash, user_id: USER_ID, value: value }
+                })
+            });
+            loadPosts();
+        }
+
+        function togglePostForm() {
+            const form = document.getElementById('create-post-form');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function submitPost() {
+            if(!activeCommunity) return alert("Select a community first!");
             const post = {
-                CommunityID: document.getElementById('post-comm-id').value,
-                Title: document.getElementById('post-title').value,
-                Content: document.getElementById('post-content').value,
-                Author: "WebUser" // Hardcoded for this simple UI
+                community_id: activeCommunity, author_id: USER_ID,
+                title: document.getElementById('post-title').value,
+                body: document.getElementById('post-body').value
             };
-            try {
-                const res = await fetch(`${API_BASE}/post`, {
-                    method: 'POST',
-                    body: JSON.stringify(post)
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    logMessage(`Post created! Hash: ${data.hash}`);
-                } else {
-                    logMessage(`Error: ${await res.text()}`);
-                }
-            } catch (e) {
-                logMessage(`Network Error: ${e.message}`);
-            }
+            await fetch(`${API}/post`, { method: 'POST', body: JSON.stringify(post) });
+            document.getElementById('post-title').value = '';
+            document.getElementById('post-body').value = '';
+            togglePostForm();
+            loadPosts();
         }
 
-        async function vote(value) {
-            const req = {
-                community_id: document.getElementById('vote-comm-id').value,
-                vote: {
-                    TargetHash: document.getElementById('vote-target').value,
-                    Value: value
-                }
-            };
-            try {
-                const res = await fetch(`${API_BASE}/vote`, {
-                    method: 'POST',
-                    body: JSON.stringify(req)
-                });
-                const text = await res.text();
-                logMessage(res.ok ? `Vote recorded: ${text}` : `Error: ${text}`);
-            } catch (e) {
-                logMessage(`Network Error: ${e.message}`);
-            }
+        async function toggleComments(postHash) {
+            const sec = document.getElementById(`comments-${postHash}`);
+            if (sec.style.display === 'block') { sec.style.display = 'none'; return; }
+            sec.style.display = 'block';
+            
+            const res = await fetch(`${API}/comments?community_id=${activeCommunity}&post_hash=${postHash}`);
+            const comments = await res.json() || [];
+            const list = document.getElementById(`comments-list-${postHash}`);
+            
+            list.innerHTML = comments.map(c => `
+                <div class="comment">
+                    <div class="meta"><b>${c.author_id}</b></div>
+                    <div class="body">${c.body}</div>
+                </div>
+            `).join('');
         }
+
+        async function submitComment(postHash, event) {
+            event.stopPropagation();
+            const body = document.getElementById(`reply-${postHash}`).value;
+            if(!body) return;
+            
+            await fetch(`${API}/comment`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    community_id: activeCommunity,
+                    comment: { post_hash: postHash, author_id: USER_ID, body: body }
+                })
+            });
+            document.getElementById(`reply-${postHash}`).value = '';
+            document.getElementById(`comments-${postHash}`).style.display = 'none';
+            toggleComments(postHash);
+        }
+
+        init();
+        setInterval(loadPosts, 5000); 
     </script>
 </body>
 </html>

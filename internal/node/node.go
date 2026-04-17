@@ -2,7 +2,9 @@ package node
 
 import (
 	"fmt"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/community"
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/consensus"
@@ -12,24 +14,33 @@ import (
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/storage"
 )
 
-// Node represents a single peer in the distributed network.
-// It acts as the host for multiple communities simultaneously.
 type Node struct {
 	NodeID models.NodeID
-	DHT    *dht.DHTNode
+	DHT    *dht.CommunityDHT
 	Gossip *network.GossipNode
 
 	mu          sync.RWMutex
 	communities map[models.CommunityID]*community.Manager
 }
 
-// NewNode boots up a new Distributed Reddit node on your machine.
 func NewNode(nodeID models.NodeID, bindAddr string) (*Node, error) {
-	// 1. Initialize the global DHT (Distributed Hash Table) so peers can find you
-	dhtNode := dht.NewDHTNode(nodeID, bindAddr)
+	// 1. Initialize DHT
+	dhtNode := dht.NewCommunityDHT(dht.DHTConfig{VirtualNodes: 150, ReplicationFactor: 3})
+	dhtNode.AddNode(&models.NodeInfo{ID: nodeID, Address: bindAddr, IsAlive: true})
 
-	// 2. Initialize the global Gossip network for passing messages
-	gossipNode := network.NewGossipNode(nodeID, bindAddr)
+	// 2. Initialize Gossip Network
+	store, _ := storage.NewContentStore("")
+	rand.Seed(time.Now().UnixNano())
+	gossipPort := 10000 + rand.Intn(10000) // Random port for gossip
+
+	gossipNode, err := network.NewGossipNode(network.GossipConfig{
+		NodeID:   nodeID,
+		BindAddr: "127.0.0.1",
+		BindPort: gossipPort,
+	}, store)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start gossip: %v", err)
+	}
 
 	return &Node{
 		NodeID:      nodeID,
@@ -39,38 +50,33 @@ func NewNode(nodeID models.NodeID, bindAddr string) (*Node, error) {
 	}, nil
 }
 
-// JoinCommunity spins up the resources needed to participate in a specific community.
 func (n *Node) JoinCommunity(communityID models.CommunityID) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Check if we are already in this community
 	if _, exists := n.communities[communityID]; exists {
 		return fmt.Errorf("already a member of community %s", communityID)
 	}
 
-	// 1. Set up isolated storage just for this community
-	store := storage.NewContentStore()
+	store, _ := storage.NewContentStore("")
 
-	// 2. Set up isolated Raft consensus just for this community's moderation
-	raftNode, err := consensus.NewRaftNode(string(n.NodeID), communityID, store)
+	raftCfg := consensus.RaftConfig{
+		NodeID:      n.NodeID,
+		CommunityID: communityID,
+		BindAddr:    fmt.Sprintf("127.0.0.1:%d", 20000+rand.Intn(10000)), // Random port for raft
+		Bootstrap:   true,
+	}
+	raftNode, err := consensus.NewRaftNode(raftCfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize raft for community: %v", err)
 	}
 
-	// 3. Create the Community Manager (the code from Step 7)
 	manager := community.NewManager(communityID, n.NodeID, store, n.Gossip, raftNode)
-
-	// 4. Save it to our active map
 	n.communities[communityID] = manager
-
-	// 5. Announce to the global DHT that our IP address is now hosting this community
-	n.DHT.Announce(string(communityID))
 
 	return nil
 }
 
-// GetCommunity retrieves the manager so the API can route user actions (like posting) to the right place.
 func (n *Node) GetCommunity(communityID models.CommunityID) (*community.Manager, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -79,6 +85,16 @@ func (n *Node) GetCommunity(communityID models.CommunityID) (*community.Manager,
 	if !exists {
 		return nil, fmt.Errorf("not a member of community %s", communityID)
 	}
-
 	return manager, nil
+}
+
+func (n *Node) GetJoinedCommunities() []models.CommunityID {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	var list []models.CommunityID
+	for cid := range n.communities {
+		list = append(list, cid)
+	}
+	return list
 }
