@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 
 	"github.com/Shan-Vision05/Distributed-Reddit/internal/models"
 )
@@ -34,9 +35,35 @@ func NewRaftNode(cfg RaftConfig) (*RaftNode, error) {
 	config.LocalID = raft.ServerID(cfg.NodeID)
 	config.SnapshotThreshold = 1024
 
-	logStore := raft.NewInmemStore()
-	stableStore := raft.NewInmemStore()
-	snapshotStore := raft.NewInmemSnapshotStore()
+	var logStore raft.LogStore
+	var stableStore raft.StableStore
+	var snapshotStore raft.SnapshotStore
+
+	// NEW: Use BoltDB for bulletproof disk persistence if a DataDir is provided
+	if cfg.DataDir == "" {
+		store := raft.NewInmemStore()
+		logStore = store
+		stableStore = store
+		snapshotStore = raft.NewInmemSnapshotStore()
+	} else {
+		raftDir := filepath.Join(cfg.DataDir, "raft")
+		if err := os.MkdirAll(raftDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create raft dir: %w", err)
+		}
+
+		boltDB, err := raftboltdb.NewBoltStore(filepath.Join(raftDir, "raft.db"))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create bolt store: %w", err)
+		}
+		logStore = boltDB
+		stableStore = boltDB
+
+		snap, err := raft.NewFileSnapshotStore(raftDir, 1, os.Stderr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create snapshot store: %w", err)
+		}
+		snapshotStore = snap
+	}
 
 	addr, err := net.ResolveTCPAddr("tcp", cfg.BindAddr)
 	if err != nil {

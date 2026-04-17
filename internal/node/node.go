@@ -3,8 +3,8 @@ package node
 import (
 	"fmt"
 	"math/rand"
-	"os"           // Add this
-	"strings"      // Add this
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,11 +26,9 @@ type Node struct {
 }
 
 func NewNode(nodeID models.NodeID, bindAddr string) (*Node, error) {
-	// 1. Initialize DHT
 	dhtNode := dht.NewCommunityDHT(dht.DHTConfig{VirtualNodes: 150, ReplicationFactor: 3})
 	dhtNode.AddNode(&models.NodeInfo{ID: nodeID, Address: bindAddr, IsAlive: true})
 
-	// 2. Initialize Gossip Network
 	store, _ := storage.NewContentStore("")
 	rand.Seed(time.Now().UnixNano())
 	gossipPort := 10000 + rand.Intn(10000)
@@ -51,24 +49,12 @@ func NewNode(nodeID models.NodeID, bindAddr string) (*Node, error) {
 		communities: make(map[models.CommunityID]*community.Manager),
 	}
 
-	// ---------------------------------------------------------
-	// NEW: AUTO-LOAD COMMUNITIES ON STARTUP
-	// ---------------------------------------------------------
-	// Scans the current directory for saved community folders/files 
-	// and automatically rejoins them so the frontend populates instantly.
 	files, err := os.ReadDir(".")
 	if err == nil {
 		for _, f := range files {
-			// Look for files or directories that match your community storage naming convention
-			// Make sure this prefix matches whatever you put in JoinCommunity!
 			prefix := fmt.Sprintf("data_%s_", nodeID) 
-			
 			if strings.HasPrefix(f.Name(), prefix) {
-				// Extract the community ID from the folder name
 				commID := strings.TrimPrefix(f.Name(), prefix)
-				commID = strings.TrimSuffix(commID, ".json") // Just in case it's a file
-				
-				// Re-join the community automatically
 				n.JoinCommunity(models.CommunityID(commID))
 			}
 		}
@@ -85,16 +71,17 @@ func (n *Node) JoinCommunity(communityID models.CommunityID) error {
 		return fmt.Errorf("already a member of community %s", communityID)
 	}
 
-	// NEW: Give this specific node and community a unique file name
-	fileName := fmt.Sprintf("data_%s_%s.json", n.NodeID, communityID)
-	store, _ := storage.NewContentStore(fileName)
+	dataDir := fmt.Sprintf("data_%s_%s", n.NodeID, communityID)
+	store, _ := storage.NewContentStore(dataDir)
 
 	raftCfg := consensus.RaftConfig{
 		NodeID:      n.NodeID,
 		CommunityID: communityID,
 		BindAddr:    fmt.Sprintf("127.0.0.1:%d", 20000+rand.Intn(10000)),
 		Bootstrap:   true,
+		DataDir:     dataDir, // NEW: Tell Raft where to save its database
 	}
+	
 	raftNode, err := consensus.NewRaftNode(raftCfg)
 	if err != nil {
 		return fmt.Errorf("failed to initialize raft for community: %v", err)
