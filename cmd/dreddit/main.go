@@ -16,6 +16,7 @@ func main() {
 	bindAddr := flag.String("addr", ":8080", "Address to bind the HTTP API to")
 	gossipPort := flag.Int("gossip-port", 0, "Gossip bind port (0 = random in 10000-19999)")
 	peers := flag.String("peers", "", "Comma-separated gossip seed addresses, e.g. 127.0.0.1:11001,127.0.0.1:11002")
+	dataDir := flag.String("data-dir", "", "Root directory for Raft logs, content store and snapshots (default: cwd)")
 	flag.Parse()
 
 	log.Printf("Starting Distributed Reddit Node: %s", *nodeID)
@@ -35,6 +36,7 @@ func main() {
 	cfg := node.NodeConfig{
 		GossipPort:  *gossipPort,
 		GossipPeers: peerList,
+		DataDir:     *dataDir,
 	}
 	dredditNode, err := node.NewNodeWithConfig(models.NodeID(*nodeID), *bindAddr, cfg)
 	if err != nil {
@@ -42,7 +44,7 @@ func main() {
 	}
 
 	// 2. Initialize the HTTP API Server
-	server := api.NewServer(dredditNode)
+	server := api.NewServer(dredditNode, *dataDir)
 
 	// 3. Start the server and keep the application running
 	log.Printf("API Server listening on %s", *bindAddr)
