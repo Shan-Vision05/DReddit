@@ -307,6 +307,33 @@ func (gn *GossipNode) RequestStateSync(peerAddr string) error {
 	return fmt.Errorf("peer not found: %s", peerAddr)
 }
 
+func (gn *GossipNode) sendStateSyncTo(member *memberlist.Node) error {
+	response := StateSyncResponsePayload{
+		Posts:      gn.store.GetAllPosts(),
+		Comments:   gn.store.GetAllComments(),
+		VoteStates: gn.store.GetAllVoteStates(),
+	}
+
+	payload, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("marshal sync response: %w", err)
+	}
+
+	respMsg := GossipMessage{
+		Type:      MsgTypeStateSyncResponse,
+		SenderID:  gn.config.NodeID,
+		Timestamp: time.Now(),
+		Payload:   payload,
+	}
+
+	data, err := json.Marshal(respMsg)
+	if err != nil {
+		return fmt.Errorf("marshal sync message: %w", err)
+	}
+
+	return gn.memberlist.SendReliable(member, data)
+}
+
 // broadcast sends a message to all peers via the broadcast queue.
 func (gn *GossipNode) broadcast(msg GossipMessage) error {
 	data, err := json.Marshal(msg)
@@ -315,6 +342,12 @@ func (gn *GossipNode) broadcast(msg GossipMessage) error {
 	}
 
 	gn.delegate.broadcasts.QueueBroadcast(&broadcast{msg: data})
+	for _, member := range gn.memberlist.Members() {
+		if models.NodeID(member.Name) == gn.config.NodeID {
+			continue
+		}
+		_ = gn.memberlist.SendReliable(member, data)
+	}
 	return nil
 }
 
@@ -401,34 +434,10 @@ func (gn *GossipNode) handleVoteMessage(msg GossipMessage) {
 }
 
 func (gn *GossipNode) handleStateSyncRequest(msg GossipMessage) {
-	// Build response with all our state
-	response := StateSyncResponsePayload{
-		Posts:      gn.store.GetAllPosts(),
-		Comments:   gn.store.GetAllComments(),
-		VoteStates: gn.store.GetAllVoteStates(),
-	}
-
-	payload, err := json.Marshal(response)
-	if err != nil {
-		return
-	}
-
-	respMsg := GossipMessage{
-		Type:      MsgTypeStateSyncResponse,
-		SenderID:  gn.config.NodeID,
-		Timestamp: time.Now(),
-		Payload:   payload,
-	}
-
-	data, err := json.Marshal(respMsg)
-	if err != nil {
-		return
-	}
-
 	// Send directly to the requester
 	for _, member := range gn.memberlist.Members() {
 		if models.NodeID(member.Name) == msg.SenderID {
-			_ = gn.memberlist.SendReliable(member, data)
+			_ = gn.sendStateSyncTo(member)
 			break
 		}
 	}
@@ -504,11 +513,21 @@ func (d *gossipDelegate) MergeRemoteState(buf []byte, join bool) {
 
 func (e *gossipEventDelegate) NotifyJoin(node *memberlist.Node) {
 	nodeID := models.NodeID(node.Name)
+	localID := e.node.config.NodeID
 
 	e.node.mu.Lock()
 	e.node.peers[nodeID] = node
 	callback := e.node.onPeerJoin
 	e.node.mu.Unlock()
+
+	if nodeID != localID {
+		go func(member *memberlist.Node) {
+			_ = e.node.sendStateSyncTo(member)
+		}(node)
+		go func(addr string) {
+			_ = e.node.RequestStateSync(addr)
+		}(node.Address())
+	}
 
 	if callback != nil {
 		callback(nodeID, node.Address())

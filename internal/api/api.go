@@ -24,6 +24,11 @@ type Server struct {
 	authFile string
 }
 
+type authState struct {
+	Users  map[string]string `json:"users"`
+	Tokens map[string]string `json:"tokens"`
+}
+
 func NewServer(n *node.Node, dataDir string) *Server {
 	authFile := "users.json"
 	if dataDir != "" {
@@ -45,13 +50,29 @@ func NewServer(n *node.Node, dataDir string) *Server {
 
 func (s *Server) loadUsers() {
 	data, err := os.ReadFile(s.authFile)
-	if err == nil {
-		json.Unmarshal(data, &s.users)
+	if err != nil {
+		return
+	}
+
+	var state authState
+	if err := json.Unmarshal(data, &state); err == nil && (state.Users != nil || state.Tokens != nil) {
+		if state.Users != nil {
+			s.users = state.Users
+		}
+		if state.Tokens != nil {
+			s.tokens = state.Tokens
+		}
+		return
+	}
+
+	var legacyUsers map[string]string
+	if err := json.Unmarshal(data, &legacyUsers); err == nil && legacyUsers != nil {
+		s.users = legacyUsers
 	}
 }
 
 func (s *Server) saveUsers() {
-	data, _ := json.MarshalIndent(s.users, "", "  ")
+	data, _ := json.MarshalIndent(authState{Users: s.users, Tokens: s.tokens}, "", "  ")
 	_ = os.WriteFile(s.authFile, data, 0644)
 }
 
@@ -151,6 +172,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.tokens[token] = req.Username
+	s.saveUsers()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -368,10 +390,13 @@ func (s *Server) handleGetComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Scan the moderation log to build the banned-users set.
+	// Scan the moderation log to build the banned-users set and deleted comments.
 	bannedUsers := make(map[string]bool)
+	deletedComments := make(map[models.ContentHash]bool)
 	for _, entry := range manager.GetModerationLog() {
 		switch entry.ActionType {
+		case models.ModRemoveComment:
+			deletedComments[entry.TargetHash] = true
 		case models.ModBanUser:
 			bannedUsers[string(entry.TargetUser)] = true
 		case models.ModUnbanUser:
@@ -387,8 +412,7 @@ func (s *Server) handleGetComments(w http.ResponseWriter, r *http.Request) {
 
 	var res []CommentResponse
 	for _, c := range comments {
-		// NEW: Only show the comment if the author is NOT banned
-		if !bannedUsers[string(c.AuthorID)] {
+		if !bannedUsers[string(c.AuthorID)] && !deletedComments[c.Hash] {
 			res = append(res, CommentResponse{Comment: c, Score: scores[c.Hash]})
 		}
 	}
