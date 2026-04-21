@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,12 +24,18 @@ type Server struct {
 	authFile string
 }
 
-func NewServer(n *node.Node) *Server {
+func NewServer(n *node.Node, dataDir string) *Server {
+	authFile := "users.json"
+	if dataDir != "" {
+		if err := os.MkdirAll(dataDir, 0755); err == nil {
+			authFile = filepath.Join(dataDir, "users.json")
+		}
+	}
 	s := &Server{
 		node:     n,
 		users:    make(map[string]string),
 		tokens:   make(map[string]string),
-		authFile: "users.json",
+		authFile: authFile,
 	}
 	s.loadUsers()
 	return s
@@ -237,14 +245,36 @@ func (s *Server) handleJoinCommunity(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	manager, _ := s.node.GetCommunity(models.CommunityID(req.CommunityID))
-	if manager != nil && isBanned(manager.GetModerationLog(), userID) {
-		http.Error(w, "You are banned from this community", http.StatusForbidden)
+	communityID := models.CommunityID(req.CommunityID)
+
+	// If the user is already in the community, check ban before returning.
+	manager, _ := s.node.GetCommunity(communityID)
+	if manager != nil {
+		if isBanned(manager.GetModerationLog(), userID) {
+			http.Error(w, "You are banned from this community", http.StatusForbidden)
+			return
+		}
+		// Already a member — idempotent, return success.
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	if err := s.node.JoinCommunity(models.CommunityID(req.CommunityID)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Decide: bootstrap a new Raft cluster, or join as a follower.
+	// HasRemoteCommunity is true when another node's CommunityAnnounce has been received,
+	// meaning a leader already exists — this node must NOT bootstrap a second cluster.
+	var joinErr error
+	if s.node.HasRemoteCommunity(communityID) {
+		joinErr = s.node.JoinCommunityAsFollower(communityID)
+	} else {
+		joinErr = s.node.JoinCommunity(communityID)
+	}
+
+	if joinErr != nil {
+		if strings.Contains(joinErr.Error(), "already a member") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, joinErr.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
