@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600">
+<rect width="100%" height="100%" fill="#ffffff" />
+<text x="80" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="600" fill="#111827" text-anchor="start">System Performance Under Failure</text>
+<rect x="80" y="90" width="260" height="140" rx="4" fill="#f9fafb" />
+<text x="100" y="120" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#6b7280" text-anchor="start">Throughput</text>
+<text x="100" y="170" font-family="system-ui, -apple-system, sans-serif" font-size="40" font-weight="700" fill="#3b82f6" text-anchor="start">228</text>
+<text x="100" y="205" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#6b7280" text-anchor="start">ops/sec</text>
+<rect x="380" y="90" width="260" height="140" rx="4" fill="#f9fafb" />
+<text x="400" y="120" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#6b7280" text-anchor="start">Total Ops</text>
+<text x="400" y="170" font-family="system-ui, -apple-system, sans-serif" font-size="40" font-weight="700" fill="#10b981" text-anchor="start">472</text>
+<text x="400" y="205" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#6b7280" text-anchor="start">472 succeeded</text>
+<rect x="680" y="90" width="260" height="140" rx="4" fill="#f9fafb" />
+<text x="700" y="120" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#6b7280" text-anchor="start">Duration</text>
+<text x="700" y="170" font-family="system-ui, -apple-system, sans-serif" font-size="40" font-weight="700" fill="#6b7280" text-anchor="start">2.1s</text>
+<text x="700" y="205" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#6b7280" text-anchor="start">0 failed</text>
+<text x="80" y="280" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="#111827" text-anchor="start">Request Completion During Failures</text>
+<text x="80" y="337" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#374151" text-anchor="start">Failover - Read Requests</text>
+<text x="80" y="358" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="400" fill="#6b7280" text-anchor="start">5/5 completed</text>
+<rect x="380" y="325" width="440" height="35" rx="2" fill="#f3f4f6" />
+<rect x="380" y="325" width="440.0" height="35" rx="2" fill="#3b82f6" />
+<text x="840" y="346" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#3b82f6" text-anchor="start">100%</text>
+<text x="80" y="402" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#374151" text-anchor="start">Failover - Write Requests</text>
+<text x="80" y="423" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="400" fill="#6b7280" text-anchor="start">5/5 completed</text>
+<rect x="380" y="390" width="440" height="35" rx="2" fill="#f3f4f6" />
+<rect x="380" y="390" width="440.0" height="35" rx="2" fill="#06b6d4" />
+<text x="840" y="411" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#06b6d4" text-anchor="start">100%</text>
+<text x="80" y="467" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#374151" text-anchor="start">Churn - Read Requests</text>
+<text x="80" y="488" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="400" fill="#6b7280" text-anchor="start">45/45 completed</text>
+<rect x="380" y="455" width="440" height="35" rx="2" fill="#f3f4f6" />
+<rect x="380" y="455" width="440.0" height="35" rx="2" fill="#10b981" />
+<text x="840" y="476" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#10b981" text-anchor="start">100%</text>
+<text x="80" y="532" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="400" fill="#374151" text-anchor="start">Churn - Write Requests</text>
+<text x="80" y="553" font-family="system-ui, -apple-system, sans-serif" font-size="11" font-weight="400" fill="#6b7280" text-anchor="start">45/45 completed</text>
+<rect x="380" y="520" width="440" height="35" rx="2" fill="#f3f4f6" />
+<rect x="380" y="520" width="440.0" height="35" rx="2" fill="#059669" />
+<text x="840" y="541" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600" fill="#059669" text-anchor="start">100%</text>
+</svg>

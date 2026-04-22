@@ -1,10 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +26,12 @@ type Server struct {
 	tokens   map[string]string // session token -> username
 	authFile string
 }
+
+const (
+	forwardedUserHeader = "X-Dreddit-Forwarded-User"
+	routedByHeader      = "X-Dreddit-Routed-By"
+	routedHopHeader     = "X-Dreddit-Routed-Hop"
+)
 
 type authState struct {
 	Users  map[string]string `json:"users"`
@@ -93,6 +102,10 @@ func generateToken() (string, error) {
 // validateToken reads the Authorization: Bearer <token> header and returns the
 // authenticated username. Returns ("", false) if the token is missing or invalid.
 func (s *Server) validateToken(r *http.Request) (string, bool) {
+	if username, ok := forwardedUser(r); ok {
+		return username, true
+	}
+
 	auth := r.Header.Get("Authorization")
 	if len(auth) < 8 || auth[:7] != "Bearer " {
 		return "", false
@@ -102,6 +115,84 @@ func (s *Server) validateToken(r *http.Request) (string, bool) {
 	defer s.mu.RUnlock()
 	username, ok := s.tokens[token]
 	return username, ok
+}
+
+func forwardedUser(r *http.Request) (string, bool) {
+	username := r.Header.Get(forwardedUserHeader)
+	if username == "" || r.Header.Get(routedByHeader) == "" {
+		return "", false
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return "", false
+	}
+
+	return username, true
+}
+
+func normalizeHTTPBase(address string) string {
+	if address == "" {
+		return ""
+	}
+	if strings.HasPrefix(address, "http://") || strings.HasPrefix(address, "https://") {
+		return strings.TrimRight(address, "/")
+	}
+	if strings.HasPrefix(address, ":") {
+		return "http://127.0.0.1" + address
+	}
+	return "http://" + strings.TrimRight(address, "/")
+}
+
+func (s *Server) proxyToPrimary(w http.ResponseWriter, r *http.Request, communityID models.CommunityID, username string, body []byte) bool {
+	if hops := r.Header.Get(routedHopHeader); hops != "" {
+		http.Error(w, "routing loop detected", http.StatusBadGateway)
+		return true
+	}
+
+	targetAddr, ok := s.node.PrimaryAddressForCommunity(communityID)
+	if !ok {
+		http.Error(w, "no DHT primary route for community", http.StatusServiceUnavailable)
+		return true
+	}
+
+	baseURL := normalizeHTTPBase(targetAddr)
+	if baseURL == "" {
+		http.Error(w, "invalid DHT primary route for community", http.StatusServiceUnavailable)
+		return true
+	}
+
+	bodyReader := bytes.NewReader(body)
+	req, err := http.NewRequest(r.Method, baseURL+r.URL.RequestURI(), bodyReader)
+	if err != nil {
+		http.Error(w, "failed to create proxy request", http.StatusBadGateway)
+		return true
+	}
+
+	req.Header = r.Header.Clone()
+	req.Header.Set(forwardedUserHeader, username)
+	req.Header.Set(routedByHeader, string(s.node.NodeID))
+	req.Header.Set(routedHopHeader, "1")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, "failed to reach DHT primary", http.StatusBadGateway)
+		return true
+	}
+	defer resp.Body.Close()
+
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+	return true
 }
 
 func (s *Server) handleSignup(w http.ResponseWriter, r *http.Request) {
@@ -292,18 +383,31 @@ func (s *Server) handleJoinCommunity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Decide: bootstrap a new Raft cluster, or join as a follower.
-	// HasRemoteCommunity is true when another node's CommunityAnnounce has been received,
-	// meaning a leader already exists — this node must NOT bootstrap a second cluster.
+	// The DHT is authoritative for ownership. Only responsible nodes may host a
+	// community, and only the DHT primary may bootstrap it.
+	if !s.node.IsResponsibleForCommunity(communityID) {
+		http.Error(w, "this node is not responsible for the community per DHT", http.StatusConflict)
+		return
+	}
+
 	var joinErr error
-	if s.node.HasRemoteCommunity(communityID) {
-		joinErr = s.node.JoinCommunityAsFollower(communityID)
-	} else {
+	if s.node.IsPrimaryForCommunity(communityID) {
 		joinErr = s.node.JoinCommunity(communityID)
+	} else {
+		if !s.node.HasKnownPrimaryForCommunity(communityID) {
+			http.Error(w, "community primary has not bootstrapped yet", http.StatusConflict)
+			return
+		}
+		joinErr = s.node.JoinCommunityAsFollower(communityID)
 	}
 
 	if joinErr != nil {
 		if strings.Contains(joinErr.Error(), "already a member") {
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if strings.Contains(joinErr.Error(), "not responsible") || strings.Contains(joinErr.Error(), "primary owner") {
+			http.Error(w, joinErr.Error(), http.StatusConflict)
 			return
 		}
 		http.Error(w, joinErr.Error(), http.StatusInternalServerError)
@@ -316,6 +420,9 @@ func (s *Server) handleGetPosts(w http.ResponseWriter, r *http.Request) {
 	commID := r.URL.Query().Get("community_id")
 	manager, err := s.node.GetCommunity(models.CommunityID(commID))
 	if err != nil {
+		if s.proxyToPrimary(w, r, models.CommunityID(commID), "", nil) {
+			return
+		}
 		http.Error(w, "Not a member", http.StatusNotFound)
 		return
 	}
@@ -361,10 +468,17 @@ func (s *Server) handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	body, _ := io.ReadAll(r.Body)
 
 	var post models.Post
-	json.NewDecoder(r.Body).Decode(&post)
+	json.Unmarshal(body, &post)
 	post.AuthorID = models.UserID(userID) // always use server-validated identity
+
+	if !s.node.IsPrimaryForCommunity(post.CommunityID) {
+		if s.proxyToPrimary(w, r, post.CommunityID, userID, body) {
+			return
+		}
+	}
 
 	manager, err := s.node.GetCommunity(post.CommunityID)
 	if err != nil {
@@ -396,6 +510,9 @@ func (s *Server) handleGetComments(w http.ResponseWriter, r *http.Request) {
 
 	manager, err := s.node.GetCommunity(models.CommunityID(commID))
 	if err != nil {
+		if s.proxyToPrimary(w, r, models.CommunityID(commID), "", nil) {
+			return
+		}
 		http.Error(w, "Not a member", http.StatusNotFound)
 		return
 	}
@@ -437,15 +554,23 @@ func (s *Server) handleCreateComment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	body, _ := io.ReadAll(r.Body)
 
 	var req struct {
 		CommunityID string         `json:"community_id"`
 		Comment     models.Comment `json:"comment"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	json.Unmarshal(body, &req)
 	req.Comment.AuthorID = models.UserID(userID) // always use server-validated identity
 
-	manager, err := s.node.GetCommunity(models.CommunityID(req.CommunityID))
+	communityID := models.CommunityID(req.CommunityID)
+	if !s.node.IsPrimaryForCommunity(communityID) {
+		if s.proxyToPrimary(w, r, communityID, userID, body) {
+			return
+		}
+	}
+
+	manager, err := s.node.GetCommunity(communityID)
 	if err != nil {
 		http.Error(w, "Not a member", http.StatusNotFound)
 		return
@@ -475,15 +600,23 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
+	body, _ := io.ReadAll(r.Body)
 
 	var req struct {
 		CommunityID string      `json:"community_id"`
 		Vote        models.Vote `json:"vote"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	json.Unmarshal(body, &req)
 	req.Vote.UserID = models.UserID(userID) // always use server-validated identity
 
-	manager, err := s.node.GetCommunity(models.CommunityID(req.CommunityID))
+	communityID := models.CommunityID(req.CommunityID)
+	if !s.node.IsPrimaryForCommunity(communityID) {
+		if s.proxyToPrimary(w, r, communityID, userID, body) {
+			return
+		}
+	}
+
+	manager, err := s.node.GetCommunity(communityID)
 	if err != nil {
 		http.Error(w, "Not a member", http.StatusNotFound)
 		return
@@ -520,9 +653,17 @@ func (s *Server) handleModerate(w http.ResponseWriter, r *http.Request) {
 		ActionType  string `json:"action_type"`
 		Target      string `json:"target"`
 	}
-	json.NewDecoder(r.Body).Decode(&req)
+	body, _ := io.ReadAll(r.Body)
+	json.Unmarshal(body, &req)
 
-	manager, err := s.node.GetCommunity(models.CommunityID(req.CommunityID))
+	communityID := models.CommunityID(req.CommunityID)
+	if !s.node.IsPrimaryForCommunity(communityID) {
+		if s.proxyToPrimary(w, r, communityID, userID, body) {
+			return
+		}
+	}
+
+	manager, err := s.node.GetCommunity(communityID)
 	if err != nil {
 		http.Error(w, "Not a member", http.StatusNotFound)
 		return
@@ -553,7 +694,7 @@ func (s *Server) handleModerate(w http.ResponseWriter, r *http.Request) {
 
 	// Map UI action type strings to model constants and route target to the correct field.
 	action := models.ModerationAction{
-		CommunityID: models.CommunityID(req.CommunityID),
+		CommunityID: communityID,
 		ModeratorID: models.UserID(userID),
 		Reason:      "Moderated via API",
 	}

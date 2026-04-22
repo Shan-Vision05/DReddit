@@ -41,6 +41,35 @@ func makeTestNode(t *testing.T, id string) *node.Node {
 	return n
 }
 
+func communityOwnedBy(t *testing.T, owner *node.Node, prefix string) models.CommunityID {
+	t.Helper()
+	for index := 0; index < 2048; index++ {
+		communityID := models.CommunityID(fmt.Sprintf("%s-%d", prefix, index))
+		primary, ok := owner.DHT.GetPrimaryNode(communityID)
+		if ok && primary == owner.NodeID {
+			return communityID
+		}
+	}
+	t.Fatalf("unable to find community with primary owner %s", owner.NodeID)
+	return ""
+}
+
+func joinCommunityOnPrimaryAndFollower(t *testing.T, primary, follower *node.Node, communityID models.CommunityID) {
+	t.Helper()
+	if err := primary.JoinCommunity(communityID); err != nil {
+		t.Fatalf("primary.JoinCommunity: %v", err)
+	}
+	waitForCondition(t, fmt.Sprintf("%s becomes Raft leader", primary.NodeID),
+		func() bool { return primary.IsRaftLeader(communityID) }, 5*time.Second)
+
+	waitForCondition(t, fmt.Sprintf("%s learns primary announcement", follower.NodeID),
+		func() bool { return follower.HasKnownPrimaryForCommunity(communityID) }, 5*time.Second)
+
+	if err := follower.JoinCommunityAsFollower(communityID); err != nil {
+		t.Fatalf("follower.JoinCommunityAsFollower: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Bug 2: Gossip and community manager share the same ContentStore
 // ---------------------------------------------------------------------------
@@ -62,19 +91,8 @@ func TestBug2_GossipAndCommunityManagerShareStore(t *testing.T) {
 	waitForCondition(t, "2 gossip members on nodeA",
 		func() bool { return nodeA.Gossip.NumMembers() >= 2 }, 5*time.Second)
 
-	communityID := models.CommunityID("shared-store-test")
-
-	// Both nodes join the same community.
-	if err := nodeA.JoinCommunity(communityID); err != nil {
-		t.Fatalf("nodeA.JoinCommunity: %v", err)
-	}
-	if err := nodeB.JoinCommunity(communityID); err != nil {
-		t.Fatalf("nodeB.JoinCommunity: %v", err)
-	}
-
-	// Wait for nodeA's Raft to elect itself so CreatePost can succeed.
-	waitForCondition(t, "nodeA becomes Raft leader",
-		func() bool { return nodeA.IsRaftLeader(communityID) }, 5*time.Second)
+	communityID := communityOwnedBy(t, nodeA, "shared-store-test")
+	joinCommunityOnPrimaryAndFollower(t, nodeA, nodeB, communityID)
 
 	managerA, err := nodeA.GetCommunity(communityID)
 	if err != nil {
@@ -137,35 +155,19 @@ func TestBug5_CommunityAnnouncePropagatesToPeer(t *testing.T) {
 	waitForCondition(t, "2 gossip members",
 		func() bool { return nodeA.Gossip.NumMembers() >= 2 }, 5*time.Second)
 
-	communityID := models.CommunityID("announce-test")
+	communityID := communityOwnedBy(t, nodeA, "announce-test")
 
 	// Node A joins the community and broadcasts the announce.
 	if err := nodeA.JoinCommunity(communityID); err != nil {
 		t.Fatalf("nodeA.JoinCommunity: %v", err)
 	}
 
-	// Wait for node B's DHT to learn about node A's community membership.
-	waitForCondition(t, "nodeB DHT knows about announce-test",
-		func() bool {
-			nodes := nodeB.DHT.LookupNodes(communityID)
-			for _, n := range nodes {
-				if n == nodeA.NodeID {
-					return true
-				}
-			}
-			return false
-		}, 5*time.Second)
+	// Wait for node B to learn that node A is the primary host via announce.
+	waitForCondition(t, "nodeB knows the primary host announcement",
+		func() bool { return nodeB.HasKnownPrimaryForCommunity(communityID) }, 5*time.Second)
 
-	responsible := nodeB.DHT.LookupNodes(communityID)
-	found := false
-	for _, n := range responsible {
-		if n == nodeA.NodeID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("Bug 5 not fixed: nodeB DHT does not list nodeA as responsible for %s", communityID)
+	if !nodeB.HasKnownPrimaryForCommunity(communityID) {
+		t.Errorf("Bug 5 not fixed: nodeB did not record nodeA as the known primary host for %s", communityID)
 	}
 }
 
@@ -192,19 +194,8 @@ func TestBug1_MultiNodeRaftCluster(t *testing.T) {
 		return nodeA.Gossip.NumMembers() >= 2 && nodeB.Gossip.NumMembers() >= 2
 	}, 5*time.Second)
 
-	communityID := models.CommunityID("raft-cluster-test")
-
-	// Node A bootstraps a new single-node Raft cluster for this community.
-	if err := nodeA.JoinCommunity(communityID); err != nil {
-		t.Fatalf("nodeA.JoinCommunity: %v", err)
-	}
-	waitForCondition(t, "nodeA is Raft leader",
-		func() bool { return nodeA.IsRaftLeader(communityID) }, 5*time.Second)
-
-	// Node B starts as a follower (no bootstrap).
-	if err := nodeB.JoinCommunityAsFollower(communityID); err != nil {
-		t.Fatalf("nodeB.JoinCommunityAsFollower: %v", err)
-	}
+	communityID := communityOwnedBy(t, nodeA, "raft-cluster-test")
+	joinCommunityOnPrimaryAndFollower(t, nodeA, nodeB, communityID)
 
 	// Get B's Raft address and have A add B as a voter.
 	raftAddrB, err := nodeB.GetRaftAddr(communityID)

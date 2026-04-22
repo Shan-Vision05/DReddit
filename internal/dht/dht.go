@@ -148,6 +148,18 @@ info, ok := d.nodes[nodeID]
 return info, ok
 }
 
+// UpdateNodeAddress updates the known address for an existing node.
+func (d *CommunityDHT) UpdateNodeAddress(nodeID models.NodeID, address string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	info, ok := d.nodes[nodeID]
+	if !ok {
+		return
+	}
+	info.Address = address
+}
+
 // NodeCount returns the number of physical nodes in the ring.
 func (d *CommunityDHT) NodeCount() int {
 d.mu.RLock()

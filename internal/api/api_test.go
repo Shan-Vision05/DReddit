@@ -47,6 +47,20 @@ func newTestNode(t *testing.T, nodeID string) *node.Node {
 	return n
 }
 
+func newTestNodeWithPeers(t *testing.T, nodeID string, peers []string) *node.Node {
+	t.Helper()
+	tmpDir := t.TempDir()
+	cfg := node.NodeConfig{DataDir: tmpDir, GossipPeers: peers}
+	n, err := node.NewNodeWithConfig(models.NodeID(nodeID), "127.0.0.1", cfg)
+	if err != nil {
+		t.Fatalf("NewNode(%s): %v", nodeID, err)
+	}
+	t.Cleanup(func() {
+		n.Gossip.Shutdown()
+	})
+	return n
+}
+
 // newTestServer wraps a node in an httptest.Server and handles cleanup.
 func newTestServer(t *testing.T, n *node.Node) *httptest.Server {
 	t.Helper()
@@ -54,6 +68,27 @@ func newTestServer(t *testing.T, n *node.Node) *httptest.Server {
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func waitForClusterMembers(t *testing.T, nodes ...*node.Node) {
+	t.Helper()
+	expected := len(nodes)
+	waitFor(t, fmt.Sprintf("cluster to reach %d members", expected), func() bool {
+		for _, n := range nodes {
+			if n.DHT.NodeCount() != expected {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second)
+}
+
+func syncHTTPAddresses(nodes map[models.NodeID]*node.Node, servers map[models.NodeID]*httptest.Server) {
+	for _, n := range nodes {
+		for id, srv := range servers {
+			n.DHT.UpdateNodeAddress(id, srv.URL)
+		}
+	}
 }
 
 // signup calls POST /api/signup and returns the session token.
@@ -207,6 +242,188 @@ func TestTokenAuth_ValidTokenAllowsAccess(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("GET /api/communities: expected 200, got %d", resp.StatusCode)
+	}
+}
+
+func TestJoinCommunity_UsesDHTOwnership(t *testing.T) {
+	primaryNode := newTestNode(t, "dht-node-1")
+	seed := primaryNode.Gossip.LocalNode().Address()
+
+	node2 := newTestNodeWithPeers(t, "dht-node-2", []string{seed})
+	node3 := newTestNodeWithPeers(t, "dht-node-3", []string{seed})
+	node4 := newTestNodeWithPeers(t, "dht-node-4", []string{seed})
+
+	waitForClusterMembers(t, primaryNode, node2, node3, node4)
+
+	nodesByID := map[models.NodeID]*node.Node{
+		primaryNode.NodeID: primaryNode,
+		node2.NodeID:       node2,
+		node3.NodeID:       node3,
+		node4.NodeID:       node4,
+	}
+	serversByID := map[models.NodeID]*httptest.Server{}
+	for id, n := range nodesByID {
+		serversByID[id] = newTestServer(t, n)
+	}
+	syncHTTPAddresses(nodesByID, serversByID)
+
+	communityID := models.CommunityID("dht-owned-community")
+	responsible := primaryNode.ResponsibleNodes(communityID)
+	if len(responsible) != 3 {
+		t.Fatalf("expected 3 responsible nodes, got %d", len(responsible))
+	}
+
+	responsibleSet := make(map[models.NodeID]struct{}, len(responsible))
+	for _, id := range responsible {
+		responsibleSet[id] = struct{}{}
+	}
+
+	var nonResponsible models.NodeID
+	for id := range nodesByID {
+		if _, ok := responsibleSet[id]; !ok {
+			nonResponsible = id
+			break
+		}
+	}
+	if nonResponsible == "" {
+		t.Fatal("expected one non-responsible node in a 4-node cluster")
+	}
+
+	nonResponsibleToken := signup(t, serversByID[nonResponsible], "outsider", "pw")
+	resp := authDo(t, "POST", serversByID[nonResponsible].URL+"/api/join", nonResponsibleToken, map[string]string{
+		"community_id": string(communityID),
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("non-responsible join: expected 409, got %d", resp.StatusCode)
+	}
+
+	primaryOwner := responsible[0]
+	primaryToken := signup(t, serversByID[primaryOwner], "primary", "pw")
+	resp = authDo(t, "POST", serversByID[primaryOwner].URL+"/api/join", primaryToken, map[string]string{
+		"community_id": string(communityID),
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("primary join: expected 200, got %d", resp.StatusCode)
+	}
+
+	waitFor(t, "primary owner to become leader", func() bool {
+		return nodesByID[primaryOwner].IsRaftLeader(communityID)
+	}, 5*time.Second)
+
+	replicaOwner := responsible[1]
+	waitFor(t, "replica to learn primary announcement", func() bool {
+		return nodesByID[replicaOwner].HasKnownPrimaryForCommunity(communityID)
+	}, 5*time.Second)
+
+	replicaToken := signup(t, serversByID[replicaOwner], "replica", "pw")
+	resp = authDo(t, "POST", serversByID[replicaOwner].URL+"/api/join", replicaToken, map[string]string{
+		"community_id": string(communityID),
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("replica join: expected 200, got %d", resp.StatusCode)
+	}
+
+	waitFor(t, "replica owner to join community", func() bool {
+		_, err := nodesByID[replicaOwner].GetCommunity(communityID)
+		return err == nil
+	}, 5*time.Second)
+}
+
+func TestCommunityRequests_RouteToPrimary(t *testing.T) {
+	primaryNode := newTestNode(t, "route-node-1")
+	seed := primaryNode.Gossip.LocalNode().Address()
+
+	node2 := newTestNodeWithPeers(t, "route-node-2", []string{seed})
+	node3 := newTestNodeWithPeers(t, "route-node-3", []string{seed})
+	node4 := newTestNodeWithPeers(t, "route-node-4", []string{seed})
+
+	waitForClusterMembers(t, primaryNode, node2, node3, node4)
+
+	nodesByID := map[models.NodeID]*node.Node{
+		primaryNode.NodeID: primaryNode,
+		node2.NodeID:       node2,
+		node3.NodeID:       node3,
+		node4.NodeID:       node4,
+	}
+	serversByID := map[models.NodeID]*httptest.Server{}
+	for id, n := range nodesByID {
+		serversByID[id] = newTestServer(t, n)
+	}
+	syncHTTPAddresses(nodesByID, serversByID)
+
+	communityID := models.CommunityID("routed-community")
+	responsible := primaryNode.ResponsibleNodes(communityID)
+	primaryOwner := responsible[0]
+
+	responsibleSet := make(map[models.NodeID]struct{}, len(responsible))
+	for _, id := range responsible {
+		responsibleSet[id] = struct{}{}
+	}
+
+	var nonResponsible models.NodeID
+	for id := range nodesByID {
+		if _, ok := responsibleSet[id]; !ok {
+			nonResponsible = id
+			break
+		}
+	}
+	if nonResponsible == "" {
+		t.Fatal("expected one non-responsible node in a 4-node cluster")
+	}
+
+	primaryToken := signup(t, serversByID[primaryOwner], "primary-owner", "pw")
+	joinResp := authDo(t, "POST", serversByID[primaryOwner].URL+"/api/join", primaryToken, map[string]string{
+		"community_id": string(communityID),
+	})
+	joinResp.Body.Close()
+	if joinResp.StatusCode != http.StatusOK {
+		t.Fatalf("primary join: expected 200, got %d", joinResp.StatusCode)
+	}
+
+	waitFor(t, "primary owner to become leader", func() bool {
+		return nodesByID[primaryOwner].IsRaftLeader(communityID)
+	}, 5*time.Second)
+
+	entryToken := signup(t, serversByID[nonResponsible], "routed-user", "pw")
+	createResp := authDo(t, "POST", serversByID[nonResponsible].URL+"/api/post", entryToken, map[string]string{
+		"community_id": string(communityID),
+		"title":        "Routed Post",
+		"body":         "created through non-owner",
+	})
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("routed create post: expected 201, got %d", createResp.StatusCode)
+	}
+
+	waitFor(t, "primary owner stores routed post", func() bool {
+		manager, err := nodesByID[primaryOwner].GetCommunity(communityID)
+		if err != nil {
+			return false
+		}
+		posts, _ := manager.GetPosts()
+		return len(posts) == 1
+	}, 5*time.Second)
+
+	resp, err := http.Get(serversByID[nonResponsible].URL + "/api/posts?community_id=" + string(communityID))
+	if err != nil {
+		t.Fatalf("routed get posts: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("routed get posts: expected 200, got %d", resp.StatusCode)
+	}
+
+	var posts []struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&posts); err != nil {
+		t.Fatalf("decode routed posts: %v", err)
+	}
+	if len(posts) != 1 || posts[0].Title != "Routed Post" {
+		t.Fatalf("unexpected routed posts response: %+v", posts)
 	}
 }
 

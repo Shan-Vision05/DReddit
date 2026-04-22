@@ -73,6 +73,7 @@ type GossipConfig struct {
 	NodeID    models.NodeID
 	BindAddr  string
 	BindPort  int
+	HTTPAddr  string
 	JoinAddrs []string // Addresses of existing nodes to join
 }
 
@@ -102,6 +103,10 @@ type gossipDelegate struct {
 // gossipEventDelegate implements memberlist.EventDelegate.
 type gossipEventDelegate struct {
 	node *GossipNode
+}
+
+type nodeMeta struct {
+	HTTPAddr string `json:"http_addr"`
 }
 
 // NewGossipNode creates a new gossip node.
@@ -485,7 +490,11 @@ func (gn *GossipNode) handleCommunityAnnounce(msg GossipMessage) {
 // --- memberlist.Delegate implementation ---
 
 func (d *gossipDelegate) NodeMeta(limit int) []byte {
-	return nil
+	meta, err := json.Marshal(nodeMeta{HTTPAddr: d.node.config.HTTPAddr})
+	if err != nil || len(meta) > limit {
+		return nil
+	}
+	return meta
 }
 
 func (d *gossipDelegate) NotifyMsg(data []byte) {
@@ -514,6 +523,10 @@ func (d *gossipDelegate) MergeRemoteState(buf []byte, join bool) {
 func (e *gossipEventDelegate) NotifyJoin(node *memberlist.Node) {
 	nodeID := models.NodeID(node.Name)
 	localID := e.node.config.NodeID
+	addr := node.Address()
+	if metaAddr := peerHTTPAddr(node); metaAddr != "" {
+		addr = metaAddr
+	}
 
 	e.node.mu.Lock()
 	e.node.peers[nodeID] = node
@@ -530,7 +543,7 @@ func (e *gossipEventDelegate) NotifyJoin(node *memberlist.Node) {
 	}
 
 	if callback != nil {
-		callback(nodeID, node.Address())
+		callback(nodeID, addr)
 	}
 }
 
@@ -553,6 +566,18 @@ func (e *gossipEventDelegate) NotifyUpdate(node *memberlist.Node) {
 	e.node.mu.Lock()
 	e.node.peers[nodeID] = node
 	e.node.mu.Unlock()
+}
+
+func peerHTTPAddr(node *memberlist.Node) string {
+	if len(node.Meta) == 0 {
+		return ""
+	}
+
+	var meta nodeMeta
+	if err := json.Unmarshal(node.Meta, &meta); err != nil {
+		return ""
+	}
+	return meta.HTTPAddr
 }
 
 // --- broadcast type for memberlist.TransmitLimitedQueue ---

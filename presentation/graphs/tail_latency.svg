@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600">
+<rect width="100%" height="100%" fill="#ffffff" />
+<text x="100" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="600" fill="#111827" text-anchor="start">Tail Latency Under Failure (Log Scale)</text>
+<text x="100" y="75" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="400" fill="#6b7280" text-anchor="start">Logarithmic scale shows all bars proportionally</text>
+<line x1="100" y1="500" x2="940" y2="500" stroke="#d1d5db" stroke-width="2" />
+<line x1="95" y1="474.8035390921049" x2="100" y2="474.8035390921049" stroke="#9ca3af" stroke-width="2" />
+<text x="85" y="479.8035390921049" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="400" fill="#6b7280" text-anchor="end">1</text>
+<line x1="95" y1="412.8345664574692" x2="100" y2="412.8345664574692" stroke="#9ca3af" stroke-width="2" />
+<text x="85" y="417.8345664574692" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="400" fill="#6b7280" text-anchor="end">10</text>
+<line x1="95" y1="332.23663465834636" x2="100" y2="332.23663465834636" stroke="#9ca3af" stroke-width="2" />
+<text x="85" y="337.23663465834636" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="400" fill="#6b7280" text-anchor="end">100</text>
+<line x1="95" y1="248.86117320909364" x2="100" y2="248.86117320909364" stroke="#9ca3af" stroke-width="2" />
+<text x="85" y="253.86117320909364" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="400" fill="#6b7280" text-anchor="end">1k</text>
+<line x1="95" y1="165.19303957415087" x2="100" y2="165.19303957415087" stroke="#9ca3af" stroke-width="2" />
+<text x="85" y="170.19303957415087" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="400" fill="#6b7280" text-anchor="end">10k</text>
+<rect x="140.0" y="460.06455431009977" width="45" height="39.93544568990022" rx="2" fill="#3b82f6" />
+<text x="162.5" y="455.06455431009977" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#3b82f6" text-anchor="middle">2</text>
+<rect x="200.0" y="334.08224977062446" width="45" height="165.91775022937557" rx="2" fill="#f59e0b" />
+<text x="222.5" y="329.08224977062446" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#f59e0b" text-anchor="middle">95</text>
+<rect x="260.0" y="334.08224977062446" width="45" height="165.91775022937557" rx="2" fill="#ef4444" />
+<text x="282.5" y="329.08224977062446" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#ef4444" text-anchor="middle">95</text>
+<text x="220.0" y="525" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="middle">Churn</text>
+<text x="220.0" y="543" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="middle">read</text>
+<rect x="420.0" y="100.06052719516185" width="45" height="399.93947280483815" rx="2" fill="#3b82f6" />
+<text x="442.5" y="95.06052719516185" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#3b82f6" text-anchor="middle">60k</text>
+<rect x="480.0" y="100.0" width="45" height="400.0" rx="2" fill="#f59e0b" />
+<text x="502.5" y="95.0" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#f59e0b" text-anchor="middle">60k</text>
+<rect x="540.0" y="100.0" width="45" height="400.0" rx="2" fill="#ef4444" />
+<text x="562.5" y="95.0" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#ef4444" text-anchor="middle">60k</text>
+<text x="500.0" y="525" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="middle">Churn</text>
+<text x="500.0" y="543" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="middle">write</text>
+<rect x="700.0" y="420.12910862019953" width="45" height="79.87089137980044" rx="2" fill="#3b82f6" />
+<text x="722.5" y="415.12910862019953" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#3b82f6" text-anchor="middle">8</text>
+<rect x="760.0" y="420.12910862019953" width="45" height="79.87089137980044" rx="2" fill="#f59e0b" />
+<text x="782.5" y="415.12910862019953" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#f59e0b" text-anchor="middle">8</text>
+<rect x="820.0" y="420.12910862019953" width="45" height="79.87089137980044" rx="2" fill="#ef4444" />
+<text x="842.5" y="415.12910862019953" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" fill="#ef4444" text-anchor="middle">8</text>
+<text x="780.0" y="525" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="middle">Failover</text>
+<text x="780.0" y="543" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="middle">write</text>
+<rect x="820" y="95" width="16" height="16" rx="2" fill="#3b82f6" />
+<text x="844" y="108" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="start">P95</text>
+<rect x="820" y="119" width="16" height="16" rx="2" fill="#f59e0b" />
+<text x="844" y="132" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="start">P99</text>
+<rect x="820" y="143" width="16" height="16" rx="2" fill="#ef4444" />
+<text x="844" y="156" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="400" fill="#374151" text-anchor="start">Max</text>
+</svg>

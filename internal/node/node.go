@@ -28,7 +28,7 @@ type Node struct {
 	communities       map[models.CommunityID]*community.Manager
 	raftNodes         map[models.CommunityID]*consensus.RaftNode
 	raftAddrs         map[models.CommunityID]string // this node's Raft TCP bind address per community
-	remoteCommunities map[models.CommunityID]bool   // communities announced by OTHER nodes
+	remoteCommunities map[models.CommunityID]map[models.NodeID]string
 }
 
 // NodeConfig holds optional configuration for NewNodeWithConfig.
@@ -78,6 +78,7 @@ func NewNodeWithConfig(nodeID models.NodeID, bindAddr string, cfg NodeConfig) (*
 		NodeID:   nodeID,
 		BindAddr: "127.0.0.1",
 		BindPort: gossipPort,
+		HTTPAddr: bindAddr,
 	}, store)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start gossip: %v", err)
@@ -92,7 +93,7 @@ func NewNodeWithConfig(nodeID models.NodeID, bindAddr string, cfg NodeConfig) (*
 		communities:       make(map[models.CommunityID]*community.Manager),
 		raftNodes:         make(map[models.CommunityID]*consensus.RaftNode),
 		raftAddrs:         make(map[models.CommunityID]string),
-		remoteCommunities: make(map[models.CommunityID]bool),
+		remoteCommunities: make(map[models.CommunityID]map[models.NodeID]string),
 	}
 
 	// Keep the DHT ring in sync with gossip membership changes.
@@ -100,6 +101,7 @@ func NewNodeWithConfig(nodeID models.NodeID, bindAddr string, cfg NodeConfig) (*
 	// new peer learns which communities are already hosted and uses follower mode.
 	gossipNode.SetOnPeerJoin(func(id models.NodeID, addr string) {
 		dhtNode.AddNode(&models.NodeInfo{ID: id, Address: addr, IsAlive: true})
+		dhtNode.UpdateNodeAddress(id, addr)
 		n.mu.RLock()
 		addrs := make(map[models.CommunityID]string, len(n.raftAddrs))
 		for cid, ra := range n.raftAddrs {
@@ -112,6 +114,15 @@ func NewNodeWithConfig(nodeID models.NodeID, bindAddr string, cfg NodeConfig) (*
 	})
 	gossipNode.SetOnPeerLeave(func(id models.NodeID) {
 		dhtNode.RemoveNode(id)
+
+		n.mu.Lock()
+		for communityID, hosts := range n.remoteCommunities {
+			delete(hosts, id)
+			if len(hosts) == 0 {
+				delete(n.remoteCommunities, communityID)
+			}
+		}
+		n.mu.Unlock()
 	})
 
 	// When a peer announces it has joined a community:
@@ -121,18 +132,26 @@ func NewNodeWithConfig(nodeID models.NodeID, bindAddr string, cfg NodeConfig) (*
 	//   3. If we are the Raft leader, add the peer as a new voter.
 	gossipNode.SetOnCommunityAnnounce(func(communityID, peerNodeID, raftAddr string) {
 		cid := models.CommunityID(communityID)
-		dhtNode.AssignCommunity(cid, []models.NodeID{models.NodeID(peerNodeID)})
+		peerID := models.NodeID(peerNodeID)
+		if !dhtNode.IsResponsible(peerID, cid) {
+			return
+		}
 
 		n.mu.Lock()
 		// Only mark as remote when a DIFFERENT node announces it.
-		if models.NodeID(peerNodeID) != nodeID {
-			n.remoteCommunities[cid] = true
+		if peerID != nodeID {
+			hosts := n.remoteCommunities[cid]
+			if hosts == nil {
+				hosts = make(map[models.NodeID]string)
+				n.remoteCommunities[cid] = hosts
+			}
+			hosts[peerID] = raftAddr
 		}
 		raftNode := n.raftNodes[cid]
 		n.mu.Unlock()
 
 		if raftNode != nil && raftNode.IsLeader() {
-			_ = raftNode.AddVoter(models.NodeID(peerNodeID), raftAddr)
+			_ = raftNode.AddVoter(peerID, raftAddr)
 		}
 	})
 
@@ -155,7 +174,13 @@ func NewNodeWithConfig(nodeID models.NodeID, bindAddr string, cfg NodeConfig) (*
 			if strings.HasPrefix(f.Name(), "raft_") {
 				commID := strings.TrimPrefix(f.Name(), "raft_")
 				if commID != "" {
-					_ = n.JoinCommunity(models.CommunityID(commID))
+					communityID := models.CommunityID(commID)
+					switch {
+					case n.IsPrimaryForCommunity(communityID):
+						_ = n.JoinCommunity(communityID)
+					case n.IsResponsibleForCommunity(communityID):
+						_ = n.JoinCommunityAsFollower(communityID)
+					}
 				}
 			}
 		}
@@ -212,6 +237,12 @@ func (n *Node) JoinCommunity(communityID models.CommunityID) error {
 
 	if _, exists := n.communities[communityID]; exists {
 		return fmt.Errorf("already a member of community %s", communityID)
+	}
+	if !n.DHT.IsResponsible(n.NodeID, communityID) {
+		return fmt.Errorf("node %s is not responsible for community %s", n.NodeID, communityID)
+	}
+	if !n.isPrimaryForCommunityLocked(communityID) {
+		return fmt.Errorf("node %s is not the primary owner for community %s", n.NodeID, communityID)
 	}
 
 	raftAddr, err := n.loadOrCreateRaftAddr(communityID)
@@ -276,6 +307,12 @@ func (n *Node) JoinCommunityAsFollower(communityID models.CommunityID) error {
 	if _, exists := n.communities[communityID]; exists {
 		return fmt.Errorf("already a member of community %s", communityID)
 	}
+	if !n.DHT.IsResponsible(n.NodeID, communityID) {
+		return fmt.Errorf("node %s is not responsible for community %s", n.NodeID, communityID)
+	}
+	if n.isPrimaryForCommunityLocked(communityID) {
+		return fmt.Errorf("node %s is the primary owner for community %s", n.NodeID, communityID)
+	}
 
 	raftAddr, err := n.loadOrCreateRaftAddr(communityID)
 	if err != nil {
@@ -303,6 +340,59 @@ func (n *Node) JoinCommunityAsFollower(communityID models.CommunityID) error {
 	_ = n.Gossip.BroadcastCommunityAnnounce(string(communityID), string(n.NodeID), raftAddr)
 
 	return nil
+}
+
+func (n *Node) ResponsibleNodes(communityID models.CommunityID) []models.NodeID {
+	return n.DHT.LookupNodes(communityID)
+}
+
+func (n *Node) IsResponsibleForCommunity(communityID models.CommunityID) bool {
+	return n.DHT.IsResponsible(n.NodeID, communityID)
+}
+
+func (n *Node) isPrimaryForCommunityLocked(communityID models.CommunityID) bool {
+	primary, ok := n.DHT.GetPrimaryNode(communityID)
+	return ok && primary == n.NodeID
+}
+
+func (n *Node) IsPrimaryForCommunity(communityID models.CommunityID) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.isPrimaryForCommunityLocked(communityID)
+}
+
+func (n *Node) HasKnownPrimaryForCommunity(communityID models.CommunityID) bool {
+	primary, ok := n.DHT.GetPrimaryNode(communityID)
+	if !ok {
+		return false
+	}
+
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if primary == n.NodeID {
+		_, joined := n.communities[communityID]
+		return joined
+	}
+
+	hosts := n.remoteCommunities[communityID]
+	if hosts == nil {
+		return false
+	}
+	_, known := hosts[primary]
+	return known
+}
+
+func (n *Node) PrimaryAddressForCommunity(communityID models.CommunityID) (string, bool) {
+	primary, ok := n.DHT.GetPrimaryNode(communityID)
+	if !ok {
+		return "", false
+	}
+	info, ok := n.DHT.GetNode(primary)
+	if !ok || info == nil || info.Address == "" {
+		return "", false
+	}
+	return info.Address, true
 }
 
 // AddRaftPeer adds a remote node as a Raft voter for the given community.
@@ -345,5 +435,5 @@ func (n *Node) IsRaftLeader(communityID models.CommunityID) bool {
 func (n *Node) HasRemoteCommunity(communityID models.CommunityID) bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.remoteCommunities[communityID]
+	return len(n.remoteCommunities[communityID]) > 0
 }
